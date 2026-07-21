@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef } from "react";
-import { Moon, Sun, Monitor, Download, Upload, Trash2, Info, Shield } from "lucide-react";
+import { Moon, Sun, Monitor, Download, Upload, Trash2, Info as InfoIcon, Shield } from "lucide-react";
 import { useSettings, useSaveSettings } from "@/hooks/use-app-data";
 import { useTheme } from "@/hooks/use-theme";
 import { db } from "@/lib/db";
@@ -108,8 +108,8 @@ function SettingsPage() {
       </Section>
 
       <Section title="About">
-        <Info label="Version" value="1.0.0" icon={<Info className="h-4 w-4" />} />
-        <Info label="Privacy" value="All data stored locally on your device." icon={<Shield className="h-4 w-4" />} />
+        <InfoRow label="Version" value="1.0.0" icon={<InfoIcon className="h-4 w-4" />} />
+        <InfoRow label="Privacy" value="All data stored locally on your device." icon={<Shield className="h-4 w-4" />} />
       </Section>
     </div>
   );
@@ -131,7 +131,7 @@ function Row({ label, checked, onChange }: { label: string; checked: boolean; on
     </div>
   );
 }
-function Info({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+function InfoRow({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3 py-1.5">
       <span className="mt-0.5 text-muted-foreground">{icon}</span>
