@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useSaveReminder } from "@/hooks/use-app-data";
 import type { CustomReminder, Priority, RepeatType } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -15,122 +17,176 @@ const PRIORITIES: Priority[] = ["low", "medium", "high"];
 const REPEATS: RepeatType[] = ["daily", "weekdays", "weekends", "specific", "everyX"];
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
+const schema = z
+  .object({
+    title: z.string().trim().min(1, "Title is required").max(80),
+    description: z.string().max(300).optional().or(z.literal("")),
+    category: z.string().min(1),
+    color: z.string(),
+    priority: z.enum(["low", "medium", "high"]),
+    time: z.string().regex(/^\d{2}:\d{2}$/, "Invalid time"),
+    repeat: z.enum(["daily", "weekdays", "weekends", "specific", "everyX"]),
+    repeatDays: z.array(z.number().int().min(0).max(6)).optional(),
+    repeatInterval: z.number().int().min(1).max(60).optional(),
+    snoozeMinutes: z.number().int().min(1).max(240),
+    notification: z.boolean(),
+    paused: z.boolean(),
+  })
+  .refine((v) => v.repeat !== "specific" || (v.repeatDays && v.repeatDays.length > 0), {
+    path: ["repeatDays"], message: "Pick at least one day",
+  });
+
+type FormValues = z.infer<typeof schema>;
+
 export function ReminderForm({ initial, onDone }: { initial?: CustomReminder; onDone: () => void }) {
   const save = useSaveReminder();
-  const [r, setR] = useState<Partial<CustomReminder>>(
-    initial ?? {
-      title: "", category: "General", icon: "bell", color: COLORS[0], priority: "medium",
-      time: "09:00", repeat: "daily", notification: true, snoozeMinutes: 10, paused: false,
-    }
-  );
-  const set = <K extends keyof CustomReminder>(k: K, v: CustomReminder[K]) => setR((p) => ({ ...p, [k]: v }));
-
-  const submit = async () => {
-    if (!r.title?.trim()) { toast.error("Title is required"); return; }
-    await save.mutateAsync(r);
-    toast.success(initial ? "Reminder updated" : "Reminder added");
-    onDone();
+  const defaults: FormValues = {
+    title: initial?.title ?? "",
+    description: initial?.description ?? "",
+    category: initial?.category ?? "General",
+    color: initial?.color ?? COLORS[0],
+    priority: initial?.priority ?? "medium",
+    time: initial?.time ?? "09:00",
+    repeat: (initial?.repeat as FormValues["repeat"]) ?? "daily",
+    repeatDays: initial?.repeatDays,
+    repeatInterval: initial?.repeatInterval,
+    snoozeMinutes: initial?.snoozeMinutes ?? 10,
+    notification: initial?.notification ?? true,
+    paused: initial?.paused ?? false,
   };
 
+  const {
+    control, register, handleSubmit, watch, setValue, formState: { errors, isSubmitting },
+  } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: defaults });
+
+  const repeat = watch("repeat");
+  const color = watch("color");
+  const repeatDays = watch("repeatDays") ?? [];
+
+  const submit = handleSubmit(async (v) => {
+    await save.mutateAsync({
+      ...(initial ?? {}),
+      ...v,
+      icon: initial?.icon ?? "bell",
+      description: v.description || undefined,
+    });
+    toast.success(initial ? "Reminder updated" : "Reminder added");
+    onDone();
+  });
+
   return (
-    <div className="mt-4 space-y-4">
-      <Field label="Title">
-        <Input value={r.title ?? ""} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Morning walk" />
+    <form onSubmit={submit} className="mt-4 space-y-4">
+      <Field label="Title" error={errors.title?.message}>
+        <Input {...register("title")} placeholder="e.g. Morning walk" />
       </Field>
       <Field label="Description">
-        <Textarea value={r.description ?? ""} onChange={(e) => set("description", e.target.value)} />
+        <Textarea rows={2} {...register("description")} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Category">
-          <Select value={r.category} onValueChange={(v) => set("category", v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Controller control={control} name="category" render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )} />
         </Field>
         <Field label="Priority">
-          <Select value={r.priority} onValueChange={(v) => set("priority", v as Priority)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {PRIORITIES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Controller control={control} name="priority" render={({ field }) => (
+            <Select value={field.value} onValueChange={(v) => field.onChange(v as Priority)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PRIORITIES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )} />
         </Field>
       </div>
       <Field label="Color">
         <div className="flex flex-wrap gap-2">
           {COLORS.map((c) => (
             <button key={c} type="button" aria-label={`Color ${c}`}
-              onClick={() => set("color", c)}
-              className="h-9 w-9 rounded-full border-2 transition-transform hover:scale-110"
-              style={{ backgroundColor: c, borderColor: r.color === c ? "var(--color-foreground)" : "transparent" }}
+              onClick={() => setValue("color", c)}
+              className="h-10 w-10 rounded-full border-2 transition-transform hover:scale-110 active:scale-95"
+              style={{ backgroundColor: c, borderColor: color === c ? "var(--color-foreground)" : "transparent" }}
             />
           ))}
         </div>
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Time">
-          <Input type="time" value={r.time ?? "09:00"} onChange={(e) => set("time", e.target.value)} />
+        <Field label="Time" error={errors.time?.message}>
+          <Input type="time" {...register("time")} />
         </Field>
-        <Field label="Snooze (min)">
-          <Input type="number" min={1} value={r.snoozeMinutes ?? 10} onChange={(e) => set("snoozeMinutes", Number(e.target.value))} />
+        <Field label="Snooze (min)" error={errors.snoozeMinutes?.message}>
+          <Input type="number" min={1} {...register("snoozeMinutes", { valueAsNumber: true })} />
         </Field>
       </div>
       <Field label="Repeat">
-        <Select value={r.repeat} onValueChange={(v) => set("repeat", v as RepeatType)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {REPEATS.map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <Controller control={control} name="repeat" render={({ field }) => (
+          <Select value={field.value} onValueChange={(v) => field.onChange(v as RepeatType)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {REPEATS.map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )} />
       </Field>
-      {r.repeat === "specific" && (
-        <Field label="Days">
-          <div className="flex gap-1">
+      {repeat === "specific" && (
+        <Field label="Days" error={errors.repeatDays?.message as string | undefined}>
+          <div className="flex flex-wrap gap-1">
             {DAYS.map((d, i) => {
-              const sel = r.repeatDays?.includes(i);
+              const sel = repeatDays.includes(i);
               return (
                 <button key={i} type="button"
-                  onClick={() => {
-                    const cur = r.repeatDays ?? [];
-                    set("repeatDays", sel ? cur.filter((x) => x !== i) : [...cur, i]);
-                  }}
-                  className={`h-9 w-9 rounded-full text-xs font-semibold ${sel ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+                  onClick={() => setValue(
+                    "repeatDays",
+                    sel ? repeatDays.filter((x) => x !== i) : [...repeatDays, i],
+                    { shouldValidate: true },
+                  )}
+                  className={`tap-target rounded-full text-xs font-semibold ${sel ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
                 >{d}</button>
               );
             })}
           </div>
         </Field>
       )}
-      {r.repeat === "everyX" && (
+      {repeat === "everyX" && (
         <Field label="Every X days">
-          <Input type="number" min={1} value={r.repeatInterval ?? 2} onChange={(e) => set("repeatInterval", Number(e.target.value))} />
+          <Input type="number" min={1} {...register("repeatInterval", { valueAsNumber: true })} />
         </Field>
       )}
       <div className="space-y-2 rounded-2xl border border-border bg-card/50 p-3">
         <div className="flex items-center justify-between py-1">
           <span className="text-sm">Notification</span>
-          <Switch checked={!!r.notification} onCheckedChange={(v) => set("notification", v)} />
+          <Controller control={control} name="notification" render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
         </div>
         <div className="flex items-center justify-between py-1">
           <span className="text-sm">Pause reminder</span>
-          <Switch checked={!!r.paused} onCheckedChange={(v) => set("paused", v)} />
+          <Controller control={control} name="paused" render={({ field }) => (
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          )} />
         </div>
       </div>
       <div className="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button onClick={submit} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
+        <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
+        <Button type="submit" disabled={isSubmitting || save.isPending}>
+          {save.isPending ? "Saving…" : "Save"}
+        </Button>
       </div>
-    </div>
+    </form>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, error }: { label: string; children: React.ReactNode; error?: string }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</Label>
       {children}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );
 }
