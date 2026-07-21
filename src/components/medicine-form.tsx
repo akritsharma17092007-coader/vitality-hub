@@ -1,4 +1,4 @@
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useSaveMedicine } from "@/hooks/use-app-data";
@@ -23,7 +23,7 @@ const DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const schema = z
   .object({
     name: z.string().trim().min(1, "Name is required").max(80),
-    dosage: z.string().trim().max(60).optional().default(""),
+    dosage: z.string().trim().max(60),
     type: z.enum(["pill", "capsule", "tablet", "syrup", "injection", "drops", "inhaler", "other"]),
     food: z.enum(["before", "after", "with", "any"]),
     color: z.string(),
@@ -237,7 +237,7 @@ function ToggleRow({
 }: {
   label: string;
   name: "notification" | "vibration" | "paused";
-  control: ReturnType<typeof useForm<FormValues>>["control"];
+  control: Control<FormValues>;
 }) {
   return (
     <div className="flex items-center justify-between py-1">
