@@ -60,6 +60,36 @@ async function clearAll() {
   );
 }
 
+async function exportAll() {
+  return {
+    medicines: await all("medicines"),
+    reminders: await all("reminders"),
+    water: await all("water"),
+    logs: await all("logs"),
+    settings: await getSettings(),
+    exportedAt: Date.now(),
+  };
+}
+
+async function getSettings(): Promise<AppSettings | null> {
+  const db_ = await getDB();
+  const row = await db_.get("settings", "app");
+  return (row?.value as AppSettings) ?? null;
+}
+
+async function saveSettings(settings: AppSettings) {
+  await put("settings", { key: "app", value: settings });
+}
+
+async function importAll(data: Awaited<ReturnType<typeof exportAll>>) {
+  await clearAll();
+  for (const m of data.medicines ?? []) await put("medicines", m);
+  for (const r of data.reminders ?? []) await put("reminders", r);
+  for (const w of data.water ?? []) await put("water", w);
+  for (const l of data.logs ?? []) await put("logs", l);
+  if (data.settings) await put("settings", { key: "app", value: data.settings });
+}
+
 export const db = {
   // medicines
   listMedicines: () => all("medicines"),
