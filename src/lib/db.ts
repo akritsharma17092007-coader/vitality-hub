@@ -91,52 +91,26 @@ async function importAll(data: Awaited<ReturnType<typeof exportAll>>) {
 }
 
 export const db = {
-  // medicines
   listMedicines: () => all("medicines"),
   saveMedicine: (m: Medicine) => put("medicines", m),
   deleteMedicine: (id: string) => del("medicines", id),
-  // reminders
   listReminders: () => all("reminders"),
   saveReminder: (r: CustomReminder) => put("reminders", r),
   deleteReminder: (id: string) => del("reminders", id),
-  // water
   listWater: () => all("water"),
   saveWater: (w: WaterEntry) => put("water", w),
   deleteWater: (id: string) => del("water", id),
-  // logs
   listLogs: () => all("logs"),
   saveLog: (l: ReminderLog) => put("logs", l),
   deleteLog: (id: string) => del("logs", id),
-  // settings
-  async getSettings(): Promise<AppSettings | null> {
-    const db_ = await getDB();
-    const row = await db_.get("settings", "app");
-    return (row?.value as AppSettings) ?? null;
-  },
-  async saveSettings(settings: AppSettings) {
-    await put("settings", { key: "app", value: settings });
-  },
+  getSettings,
+  saveSettings,
   clearAll,
-  async exportAll() {
-    return {
-      medicines: await all("medicines"),
-      reminders: await all("reminders"),
-      water: await all("water"),
-      logs: await all("logs"),
-      settings: await this.getSettings(),
-      exportedAt: Date.now(),
-    };
-  },
-  async importAll(data: Awaited<ReturnType<typeof db.exportAll>>) {
-    await clearAll();
-    for (const m of data.medicines ?? []) await put("medicines", m);
-    for (const r of data.reminders ?? []) await put("reminders", r);
-    for (const w of data.water ?? []) await put("water", w);
-    for (const l of data.logs ?? []) await put("logs", l);
-    if (data.settings) await put("settings", { key: "app", value: data.settings });
-  },
+  exportAll,
+  importAll,
 };
 
 export function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
