@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pill, Bell, Droplet } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { MedicineForm } from "./medicine-form";
@@ -7,9 +7,19 @@ import { WaterQuickAdd } from "./water-quick-add";
 
 type Tab = "menu" | "medicine" | "reminder" | "water";
 
-export function AddSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [tab, setTab] = useState<Tab>("menu");
+export function AddSheet({
+  open, onOpenChange, initialTab,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  initialTab?: "medicine" | "reminder" | "water";
+}) {
+  const [tab, setTab] = useState<Tab>(initialTab ?? "menu");
   const close = () => { setTab("menu"); onOpenChange(false); };
+
+  useEffect(() => {
+    if (open) setTab(initialTab ?? "menu");
+  }, [open, initialTab]);
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) setTab("menu"); onOpenChange(v); }}>

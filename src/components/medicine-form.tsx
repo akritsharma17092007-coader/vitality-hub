@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useForm, Controller, type Control } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useSaveMedicine } from "@/hooks/use-app-data";
 import type { Medicine, MedicineType, FoodTiming, RepeatType } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -18,52 +20,108 @@ const FOOD: FoodTiming[] = ["before", "after", "with", "any"];
 const REPEATS: RepeatType[] = ["daily", "weekdays", "weekends", "specific", "everyX"];
 const DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
+const schema = z
+  .object({
+    name: z.string().trim().min(1, "Name is required").max(80),
+    dosage: z.string().trim().max(60),
+    type: z.enum(["pill", "capsule", "tablet", "syrup", "injection", "drops", "inhaler", "other"]),
+    food: z.enum(["before", "after", "with", "any"]),
+    color: z.string(),
+    times: z.array(z.string().regex(/^\d{2}:\d{2}$/, "Invalid time")).min(1, "Add at least one time"),
+    repeat: z.enum(["daily", "weekdays", "weekends", "specific", "everyX"]),
+    repeatDays: z.array(z.number().int().min(0).max(6)).optional(),
+    repeatInterval: z.number().int().min(1).max(60).optional(),
+    startDate: z.string().min(1, "Start date required"),
+    endDate: z.string().optional().or(z.literal("")),
+    notes: z.string().max(500).optional().or(z.literal("")),
+    paused: z.boolean(),
+    notification: z.boolean(),
+    vibration: z.boolean(),
+  })
+  .refine((v) => v.repeat !== "specific" || (v.repeatDays && v.repeatDays.length > 0), {
+    path: ["repeatDays"], message: "Pick at least one day",
+  })
+  .refine((v) => v.repeat !== "everyX" || (v.repeatInterval ?? 0) >= 1, {
+    path: ["repeatInterval"], message: "Interval must be ≥ 1",
+  });
+
+type FormValues = z.infer<typeof schema>;
+
 export function MedicineForm({ initial, onDone }: { initial?: Medicine; onDone: () => void }) {
   const save = useSaveMedicine();
-  const [m, setM] = useState<Partial<Medicine>>(
-    initial ?? {
-      name: "", dosage: "", type: "pill", food: "any", color: COLORS[0],
-      times: ["09:00"], repeat: "daily", startDate: new Date().toISOString().slice(0, 10),
-      paused: false, notification: true, vibration: true,
-    }
-  );
-  const set = <K extends keyof Medicine>(k: K, v: Medicine[K]) => setM((p) => ({ ...p, [k]: v }));
 
-  const addTime = () => set("times", [...(m.times ?? []), "12:00"]);
-  const rmTime = (i: number) => set("times", (m.times ?? []).filter((_, x) => x !== i));
-  const setTime = (i: number, v: string) => set("times", (m.times ?? []).map((t, x) => (x === i ? v : t)));
-
-  const submit = async () => {
-    if (!m.name?.trim()) { toast.error("Name is required"); return; }
-    await save.mutateAsync(m);
-    toast.success(initial ? "Medicine updated" : "Medicine added");
-    onDone();
+  const defaults: FormValues = {
+    name: initial?.name ?? "",
+    dosage: initial?.dosage ?? "",
+    type: initial?.type ?? "pill",
+    food: initial?.food ?? "any",
+    color: initial?.color ?? COLORS[0],
+    times: initial?.times ?? ["09:00"],
+    repeat: (initial?.repeat as FormValues["repeat"]) ?? "daily",
+    repeatDays: initial?.repeatDays,
+    repeatInterval: initial?.repeatInterval,
+    startDate: initial?.startDate ?? new Date().toISOString().slice(0, 10),
+    endDate: initial?.endDate ?? "",
+    notes: initial?.notes ?? "",
+    paused: initial?.paused ?? false,
+    notification: initial?.notification ?? true,
+    vibration: initial?.vibration ?? true,
   };
 
+  const {
+    control, register, handleSubmit, watch, setValue, formState: { errors, isSubmitting },
+  } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: defaults });
+
+  const repeat = watch("repeat");
+  const times = watch("times");
+  const color = watch("color");
+  const repeatDays = watch("repeatDays") ?? [];
+
+  const addTime = () => setValue("times", [...times, "12:00"], { shouldValidate: true });
+  const rmTime = (i: number) =>
+    setValue("times", times.filter((_, x) => x !== i), { shouldValidate: true });
+  const setTime = (i: number, v: string) =>
+    setValue("times", times.map((t, x) => (x === i ? v : t)), { shouldValidate: true });
+
+  const submit = handleSubmit(async (v) => {
+    await save.mutateAsync({
+      ...(initial ?? {}),
+      ...v,
+      endDate: v.endDate || undefined,
+      notes: v.notes || undefined,
+    });
+    toast.success(initial ? "Medicine updated" : "Medicine added");
+    onDone();
+  });
+
   return (
-    <div className="mt-4 space-y-4">
-      <Field label="Name">
-        <Input value={m.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Paracetamol" />
+    <form onSubmit={submit} className="mt-4 space-y-4">
+      <Field label="Name" error={errors.name?.message}>
+        <Input {...register("name")} placeholder="e.g. Paracetamol" />
       </Field>
       <Field label="Dosage">
-        <Input value={m.dosage ?? ""} onChange={(e) => set("dosage", e.target.value)} placeholder="e.g. 500 mg" />
+        <Input {...register("dosage")} placeholder="e.g. 500 mg" />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Type">
-          <Select value={m.type} onValueChange={(v) => set("type", v as MedicineType)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {MED_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Controller control={control} name="type" render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {MED_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )} />
         </Field>
         <Field label="Food">
-          <Select value={m.food} onValueChange={(v) => set("food", v as FoodTiming)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {FOOD.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <Controller control={control} name="food" render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {FOOD.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )} />
         </Field>
       </div>
 
@@ -71,20 +129,21 @@ export function MedicineForm({ initial, onDone }: { initial?: Medicine; onDone: 
         <div className="flex flex-wrap gap-2">
           {COLORS.map((c) => (
             <button key={c} type="button" aria-label={`Color ${c}`}
-              onClick={() => set("color", c)}
-              className="h-9 w-9 rounded-full border-2 transition-transform hover:scale-110"
-              style={{ backgroundColor: c, borderColor: m.color === c ? "var(--color-foreground)" : "transparent" }}
+              onClick={() => setValue("color", c)}
+              className="h-10 w-10 rounded-full border-2 transition-transform hover:scale-110 active:scale-95"
+              style={{ backgroundColor: c, borderColor: color === c ? "var(--color-foreground)" : "transparent" }}
             />
           ))}
         </div>
       </Field>
 
-      <Field label="Times">
+      <Field label="Times" error={errors.times?.message as string | undefined}>
         <div className="space-y-2">
-          {(m.times ?? []).map((t, i) => (
+          {times.map((t, i) => (
             <div key={i} className="flex gap-2">
               <Input type="time" value={t} onChange={(e) => setTime(i, e.target.value)} />
-              <Button type="button" variant="ghost" size="icon" onClick={() => rmTime(i)} aria-label="Remove time">
+              <Button type="button" variant="ghost" size="icon" onClick={() => rmTime(i)} aria-label="Remove time"
+                disabled={times.length === 1}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -96,26 +155,29 @@ export function MedicineForm({ initial, onDone }: { initial?: Medicine; onDone: 
       </Field>
 
       <Field label="Repeat">
-        <Select value={m.repeat} onValueChange={(v) => set("repeat", v as RepeatType)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {REPEATS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <Controller control={control} name="repeat" render={({ field }) => (
+          <Select value={field.value} onValueChange={(v) => field.onChange(v as RepeatType)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {REPEATS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )} />
       </Field>
 
-      {m.repeat === "specific" && (
-        <Field label="Days">
-          <div className="flex gap-1">
+      {repeat === "specific" && (
+        <Field label="Days" error={errors.repeatDays?.message as string | undefined}>
+          <div className="flex flex-wrap gap-1">
             {DAYS.map((d, i) => {
-              const sel = m.repeatDays?.includes(i);
+              const sel = repeatDays.includes(i);
               return (
                 <button key={i} type="button"
-                  onClick={() => {
-                    const cur = m.repeatDays ?? [];
-                    set("repeatDays", sel ? cur.filter((x) => x !== i) : [...cur, i]);
-                  }}
-                  className={`h-9 w-9 rounded-full text-xs font-semibold ${sel ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+                  onClick={() => setValue(
+                    "repeatDays",
+                    sel ? repeatDays.filter((x) => x !== i) : [...repeatDays, i],
+                    { shouldValidate: true },
+                  )}
+                  className={`tap-target rounded-full text-xs font-semibold ${sel ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
                 >{d}</button>
               );
             })}
@@ -123,53 +185,66 @@ export function MedicineForm({ initial, onDone }: { initial?: Medicine; onDone: 
         </Field>
       )}
 
-      {m.repeat === "everyX" && (
-        <Field label="Every X days">
-          <Input type="number" min={1} value={m.repeatInterval ?? 2}
-            onChange={(e) => set("repeatInterval", Number(e.target.value))} />
+      {repeat === "everyX" && (
+        <Field label="Every X days" error={errors.repeatInterval?.message}>
+          <Input type="number" min={1}
+            {...register("repeatInterval", { valueAsNumber: true })}
+          />
         </Field>
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Start date">
-          <Input type="date" value={m.startDate ?? ""} onChange={(e) => set("startDate", e.target.value)} />
+        <Field label="Start date" error={errors.startDate?.message}>
+          <Input type="date" {...register("startDate")} />
         </Field>
         <Field label="End date">
-          <Input type="date" value={m.endDate ?? ""} onChange={(e) => set("endDate", e.target.value)} />
+          <Input type="date" {...register("endDate")} />
         </Field>
       </div>
 
       <Field label="Notes">
-        <Textarea value={m.notes ?? ""} onChange={(e) => set("notes", e.target.value)} placeholder="Optional notes" />
+        <Textarea rows={2} {...register("notes")} placeholder="Optional notes" />
       </Field>
 
       <div className="space-y-2 rounded-2xl border border-border bg-card/50 p-3">
-        <ToggleRow label="Notification" checked={!!m.notification} onChange={(v) => set("notification", v)} />
-        <ToggleRow label="Vibration" checked={!!m.vibration} onChange={(v) => set("vibration", v)} />
-        <ToggleRow label="Pause reminder" checked={!!m.paused} onChange={(v) => set("paused", v)} />
+        <ToggleRow label="Notification" name="notification" control={control} />
+        <ToggleRow label="Vibration" name="vibration" control={control} />
+        <ToggleRow label="Pause reminder" name="paused" control={control} />
       </div>
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" onClick={onDone}>Cancel</Button>
-        <Button onClick={submit} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
+        <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
+        <Button type="submit" disabled={isSubmitting || save.isPending}>
+          {save.isPending ? "Saving…" : "Save"}
+        </Button>
       </div>
-    </div>
+    </form>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, error }: { label: string; children: React.ReactNode; error?: string }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</Label>
       {children}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );
 }
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+
+function ToggleRow({
+  label, name, control,
+}: {
+  label: string;
+  name: "notification" | "vibration" | "paused";
+  control: Control<FormValues>;
+}) {
   return (
     <div className="flex items-center justify-between py-1">
       <span className="text-sm">{label}</span>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Controller control={control} name={name} render={({ field }) => (
+        <Switch checked={field.value} onCheckedChange={field.onChange} />
+      )} />
     </div>
   );
 }
